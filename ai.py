@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 class IntentSchema(BaseModel):
-    intent: str = Field(description="One of: log_expense, set_budget, ask_advice, general_chat")
+    intent: str = Field(description="One of: log_expense, set_budget, ask_advice, analyze_spending, general_chat")
     amount: Optional[float] = Field(description="The monetary amount mentioned, if any", default=None)
     category: Optional[str] = Field(description="The category of expense. e.g., food, transport, shopping, bills, entertainment, other", default=None)
     description: Optional[str] = Field(description="Short description of what was bought or asked", default=None)
@@ -30,7 +30,7 @@ def add_to_history(user_id: int, role: str, text: str):
     if len(history) > 10:
         conversation_history[user_id] = history[-10:]
 
-def parse_intent(message: str, user_id: int = None) -> dict:
+def parse_intent(message: str, user_id: int = None, image_bytes: bytes = None, mime_type: str = "image/jpeg") -> dict:
     client = get_client()
     if not client:
         return None
@@ -46,10 +46,16 @@ def parse_intent(message: str, user_id: int = None) -> dict:
         prompt += f"Recent Chat Context for pronoun resolution:\n{history_text}\n"
     prompt += f"Message: '{message}'"
     
+    parts = []
+    if image_bytes:
+        parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+        prompt += "\nAn image (receipt/invoice) is attached. Extract the total amount, category, and description from the image."
+    parts.append(types.Part.from_text(text=prompt))
+    
     try:
         response = client.models.generate_content(
             model='gemini-2.5-flash',
-            contents=prompt,
+            contents=parts,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=IntentSchema,
@@ -95,6 +101,11 @@ def generate_response(user_message: str, context: dict, intent_data: dict, user_
         categories=json.dumps(context.get('spent_by_category', {})),
         intent_data=json.dumps(intent_data)
     )
+    
+    if "all_transactions" in context:
+        formatted_system_prompt += "\n\nUser has requested a deep financial analysis. Here are their recent transactions:\n"
+        formatted_system_prompt += json.dumps(context["all_transactions"])
+        formatted_system_prompt += "\nLook closely at this raw data. Identify their worst spending habits, where their money goes, and project if they'll survive the month. Keep it witty and give them practical (but sarcastic) advice."
 
     try:
         contents_to_send = []

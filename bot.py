@@ -22,10 +22,20 @@ db.init_db()
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    text = update.message.text
+    
+    text = ""
+    image_bytes = None
+    
+    if update.message.photo:
+        photo_file = await update.message.photo[-1].get_file()
+        byte_array = await photo_file.download_as_bytearray()
+        image_bytes = bytes(byte_array)
+        text = update.message.caption or "Here is a receipt. Extract the expense."
+    else:
+        text = update.message.text
     
     # Try Gemini first
-    intent_data = ai.parse_intent(text, user_id=user_id)
+    intent_data = ai.parse_intent(text, user_id=user_id, image_bytes=image_bytes)
     
     # Fallback to Regex if Gemini fails or is not configured
     if not intent_data:
@@ -44,6 +54,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     # Get updated financial context
     fin_context = db.get_financial_context(user_id)
+    
+    if intent == "analyze_spending":
+        fin_context["all_transactions"] = [
+            {"date": t["timestamp"], "amount": t["amount"], "category": t["category"], "desc": t["description"]}
+            for t in db.get_all_transactions(user_id)
+        ]
     
     # Generate Response
     response = ai.generate_response(text, fin_context, intent_data, user_id=user_id)
@@ -67,8 +83,8 @@ if __name__ == '__main__':
         
     application = ApplicationBuilder().token(token).build()
     
-    # Handle all text messages that aren't commands
-    msg_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message)
+    # Handle text messages and photos
+    msg_handler = MessageHandler((filters.TEXT | filters.PHOTO) & (~filters.COMMAND), handle_message)
     application.add_handler(msg_handler)
     
     print("Bot is running...")

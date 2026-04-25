@@ -117,3 +117,11 @@ def get_financial_context(user_id: int) -> dict:
         "day_of_month": now.day,
         "days_in_month": days_in_month
     }
+
+def get_all_transactions(user_id: int) -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute('SELECT * FROM transactions WHERE user_id = ? ORDER BY timestamp DESC LIMIT 100', (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
